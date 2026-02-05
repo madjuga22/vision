@@ -129,18 +129,28 @@ def detect_color(hsv_roi, color_hint):
     if total_pixels == 0:
         return "UNKNOWN"
 
+    white_mask = build_mask(hsv_roi, "WHITE")
+    white_ratio = cv2.countNonZero(white_mask) / total_pixels
+    saturation_mean = float(np.mean(hsv_roi[:, :, 1]))
+    if (
+        white_ratio >= (WHITE_RATIO_THRESHOLD * 0.8)
+        and saturation_mean < (MIN_SATURATION + 10)
+        and has_black_bands(hsv_roi)
+    ):
+        return "WHITE"
+
     if color_hint in ("RED", "GREEN", "BLUE"):
         mask = build_mask(hsv_roi, color_hint)
         ratio = cv2.countNonZero(mask) / total_pixels
         saturation_mean = float(np.mean(hsv_roi[:, :, 1]))
         min_saturation = MIN_SATURATION + (10 if color_hint == "BLUE" else 0)
+        if color_hint == "BLUE" and white_ratio >= WHITE_RATIO_THRESHOLD:
+            return "UNKNOWN"
         if ratio >= COLOR_RATIO_THRESHOLD and saturation_mean >= min_saturation:
             return color_hint
         return "UNKNOWN"
 
     if color_hint == "WHITE":
-        white_mask = build_mask(hsv_roi, "WHITE")
-        white_ratio = cv2.countNonZero(white_mask) / total_pixels
         if white_ratio >= WHITE_RATIO_THRESHOLD and has_black_bands(hsv_roi):
             return "WHITE"
         return "UNKNOWN"
