@@ -9,9 +9,9 @@ COLOR_RANGES = {
         ((0, 60, 40), (10, 255, 255)),
         ((170, 60, 40), (180, 255, 255)),
     ],
-    "GREEN": [((35, 40, 40), (85, 255, 255))],
+    "GREEN": [((30, 25, 30), (90, 255, 255))],
     "BLUE": [((90, 40, 40), (130, 255, 255))],
-    "WHITE": [((0, 0, 120), (180, 70, 255))],
+    "WHITE": [((0, 0, 150), (180, 80, 255))],
     "BLACK": [((0, 0, 0), (180, 70, 60))],
 }
 
@@ -33,12 +33,14 @@ DRAW_COLORS = {
 MIN_AREA = 1200
 ASPECT_MIN = 2.2
 ASPECT_MAX = 4.5
-COLOR_RATIO_THRESHOLD = 0.2
-WHITE_RATIO_THRESHOLD = 0.35
-BLACK_BAND_RATIO = 0.08
+COLOR_RATIO_THRESHOLD = 0.16
+WHITE_RATIO_THRESHOLD = 0.25
+BLACK_BAND_RATIO = 0.06
 CANDIDATE_OVERLAP = 0.3
 MIN_EXTENT = 0.5
-MIN_SATURATION = 55
+MIN_SATURATION = 45
+BLACK_BAND_MIN_RATIO = 0.02
+BLACK_BAND_VERTICAL_GAP = 0.35
 
 COLOR_TTL = 15
 last_seen = {}
@@ -55,13 +57,32 @@ def build_mask(hsv_roi, color):
 
 def has_black_bands(hsv_roi):
     mask_black = build_mask(hsv_roi, "BLACK")
-    height = hsv_roi.shape[0]
-    band = max(1, int(height * 0.15))
+    height, width = mask_black.shape[:2]
+    band = max(1, int(height * 0.18))
     top_band = mask_black[:band, :]
     bottom_band = mask_black[-band:, :]
     top_ratio = cv2.countNonZero(top_band) / top_band.size
     bottom_ratio = cv2.countNonZero(bottom_band) / bottom_band.size
-    return top_ratio > BLACK_BAND_RATIO and bottom_ratio > BLACK_BAND_RATIO
+
+    if top_ratio < BLACK_BAND_MIN_RATIO or bottom_ratio < BLACK_BAND_MIN_RATIO:
+        return False
+
+    ys, xs = np.where(mask_black > 0)
+    if ys.size == 0:
+        return False
+    x_left = np.min(xs)
+    x_right = np.max(xs)
+    if (x_right - x_left) / max(1, width) < 0.4:
+        return False
+
+    top_center = np.mean(np.where(top_band > 0)[0]) if top_ratio > 0 else 0
+    bottom_center = (
+        np.mean(np.where(bottom_band > 0)[0]) + (height - band)
+        if bottom_ratio > 0
+        else height
+    )
+    gap_ratio = (bottom_center - top_center) / max(1, height)
+    return gap_ratio >= BLACK_BAND_VERTICAL_GAP
 
 
 def detect_color(hsv_roi, color_hint):
@@ -125,7 +146,7 @@ while True:
     max_area = frame_area * 0.2
     candidates = []
 
-    for color in ("RED", "GREEN", "BLUE", "WHITE"):
+    for color in ("RED", "GREEN", "BLUE"):
         mask = build_mask(hsv, color)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
@@ -146,6 +167,30 @@ while True:
             ):
                 candidates.append((x, y, w, h, color))
 
+    white_mask = build_mask(hsv, "WHITE")
+    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    black_mask = build_mask(hsv, "BLACK")
+    black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    white_with_black = cv2.bitwise_and(white_mask, cv2.dilate(black_mask, None, 1))
+    white_contours, _ = cv2.findContours(
+        white_with_black, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    for cnt in white_contours:
+        area = cv2.contourArea(cnt)
+        if area < MIN_AREA or area > max_area:
+            continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w == 0:
+            continue
+        aspect = h / w
+        extent = area / float(w * h)
+        if (
+            ASPECT_MIN < aspect < ASPECT_MAX
+            and h > w
+            and extent >= MIN_EXTENT
+        ):
+            candidates.append((x, y, w, h, "WHITE"))
     candidates = dedupe_boxes(candidates)
 
     detected_colors = []
