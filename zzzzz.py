@@ -269,10 +269,12 @@ while True:
     for color_name in color_hits:
         color_hits[color_name] = max(0, color_hits[color_name] - HIT_DECAY)
 
+    confirmed_detections = []
     for color, x, y, w, h in detected_colors:
         color_hits[color] += 1
         if color_hits[color] < HIT_CONFIRM:
             continue
+        confirmed_detections.append((color, x, y, w, h))
         draw_color = DRAW_COLORS.get(color, DRAW_COLORS["UNKNOWN"])
         cv2.rectangle(frame, (x, y), (x + w, y + h), draw_color, 2)
         cv2.putText(
@@ -285,7 +287,7 @@ while True:
             2,
         )
 
-    for color, _, _, _, _ in detected_colors:
+    for color, _, _, _, _ in confirmed_detections:
         if color not in last_seen:
             print(f"обнаружен цилиндр цвета {COLOR_NAMES_RU[color]}")
         last_seen[color] = WHITE_TTL if color == "WHITE" else COLOR_TTL
