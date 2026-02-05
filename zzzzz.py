@@ -67,31 +67,60 @@ def build_mask(hsv_roi, color):
 def has_black_bands(hsv_roi):
     mask_black = build_mask(hsv_roi, "BLACK")
     height, width = mask_black.shape[:2]
-    band = max(1, int(height * 0.18))
+    band = max(1, int(height * 0.12))
     top_band = mask_black[:band, :]
     bottom_band = mask_black[-band:, :]
     top_ratio = cv2.countNonZero(top_band) / top_band.size
     bottom_ratio = cv2.countNonZero(bottom_band) / bottom_band.size
 
-    if top_ratio < BLACK_BAND_MIN_RATIO or bottom_ratio < BLACK_BAND_MIN_RATIO:
-        return False
+    if top_ratio >= BLACK_BAND_MIN_RATIO and bottom_ratio >= BLACK_BAND_MIN_RATIO:
+        ys, xs = np.where(mask_black > 0)
+        if ys.size == 0:
+            return False
+        x_left = np.min(xs)
+        x_right = np.max(xs)
+        if (x_right - x_left) / max(1, width) < 0.35:
+            return False
 
-    ys, xs = np.where(mask_black > 0)
-    if ys.size == 0:
-        return False
-    x_left = np.min(xs)
-    x_right = np.max(xs)
-    if (x_right - x_left) / max(1, width) < 0.4:
-        return False
+        top_center = np.mean(np.where(top_band > 0)[0]) if top_ratio > 0 else 0
+        bottom_center = (
+            np.mean(np.where(bottom_band > 0)[0]) + (height - band)
+            if bottom_ratio > 0
+            else height
+        )
+        gap_ratio = (bottom_center - top_center) / max(1, height)
+        return gap_ratio >= (BLACK_BAND_VERTICAL_GAP * 0.8)
 
-    top_center = np.mean(np.where(top_band > 0)[0]) if top_ratio > 0 else 0
-    bottom_center = (
-        np.mean(np.where(bottom_band > 0)[0]) + (height - band)
-        if bottom_ratio > 0
-        else height
+    contours, _ = cv2.findContours(
+        mask_black, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
-    gap_ratio = (bottom_center - top_center) / max(1, height)
-    return gap_ratio >= BLACK_BAND_VERTICAL_GAP
+    if len(contours) < 2:
+        return False
+    bands = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < BLACK_BAND_MIN_AREA:
+            continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        if h == 0:
+            continue
+        if (w / h) < (BLACK_BAND_MIN_ASPECT * 0.7):
+            continue
+        if (h / max(1, height)) > (BLACK_BAND_HEIGHT_RATIO * 1.2):
+            continue
+        bands.append((x, y, w, h))
+    if len(bands) < 2:
+        return False
+    bands.sort(key=lambda b: b[1])
+    top = bands[0]
+    bottom = bands[-1]
+    if top[1] > height * 0.35 or bottom[1] + bottom[3] < height * 0.65:
+        return False
+    x_left = max(top[0], bottom[0])
+    x_right = min(top[0] + top[2], bottom[0] + bottom[2])
+    overlap = max(0, x_right - x_left)
+    min_width = min(top[2], bottom[2])
+    return min_width > 0 and (overlap / min_width) >= (BLACK_BAND_X_OVERLAP * 0.7)
 
 
 def pair_black_bands(bands, frame_height):
@@ -255,6 +284,23 @@ while True:
         roi_white = white_mask[y : y + h, x : x + w]
         white_ratio = cv2.countNonZero(roi_white) / float(w * h)
         if white_ratio >= WHITE_RATIO_THRESHOLD:
+            candidates.append((x, y, w, h, "WHITE"))
+
+    white_contours, _ = cv2.findContours(
+        white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    for cnt in white_contours:
+        area = cv2.contourArea(cnt)
+        if area < MIN_AREA or area > max_area:
+            continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w == 0:
+            continue
+        aspect = h / w
+        if not (ASPECT_MIN < aspect < ASPECT_MAX and h > w):
+            continue
+        roi = hsv[y : y + h, x : x + w]
+        if has_black_bands(roi):
             candidates.append((x, y, w, h, "WHITE"))
     candidates = dedupe_boxes(candidates)
 
