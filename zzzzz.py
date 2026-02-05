@@ -9,7 +9,7 @@ COLOR_RANGES = {
         ((0, 60, 40), (10, 255, 255)),
         ((170, 60, 40), (180, 255, 255)),
     ],
-    "GREEN": [((25, 20, 20), (95, 255, 255))],
+    "GREEN": [((20, 20, 20), (100, 255, 255))],
     "BLUE": [((90, 40, 40), (130, 255, 255))],
     "WHITE": [((0, 0, 140), (180, 90, 255))],
     "BLACK": [((0, 0, 0), (180, 90, 80))],
@@ -34,13 +34,13 @@ MIN_AREA = 1200
 ASPECT_MIN = 2.2
 ASPECT_MAX = 4.5
 COLOR_RATIO_THRESHOLD = 0.22
-GREEN_RATIO_THRESHOLD = 0.18
-WHITE_RATIO_THRESHOLD = 0.15
+GREEN_RATIO_THRESHOLD = 0.12
+WHITE_RATIO_THRESHOLD = 0.12
 BLACK_BAND_RATIO = 0.04
 CANDIDATE_OVERLAP = 0.3
 MIN_EXTENT = 0.5
 MIN_SATURATION = 60
-GREEN_MIN_SATURATION = 45
+GREEN_MIN_SATURATION = 30
 BLACK_BAND_MIN_RATIO = 0.015
 BLACK_BAND_VERTICAL_GAP = 0.25
 BLACK_BAND_MIN_AREA = 60
@@ -164,12 +164,12 @@ def detect_color(hsv_roi, color_hint):
     white_mask = build_mask(hsv_roi, "WHITE")
     white_ratio = cv2.countNonZero(white_mask) / total_pixels
     saturation_mean = float(np.mean(hsv_roi[:, :, 1]))
-    if (
-        white_ratio >= (WHITE_RATIO_THRESHOLD * 0.8)
-        and saturation_mean < (MIN_SATURATION + 10)
-        and has_black_bands(hsv_roi)
-    ):
-        return "WHITE"
+    if has_black_bands(hsv_roi):
+        if (
+            white_ratio >= (WHITE_RATIO_THRESHOLD * 0.6)
+            and saturation_mean < (MIN_SATURATION + 15)
+        ):
+            return "WHITE"
 
     if color_hint in ("RED", "GREEN", "BLUE"):
         mask = build_mask(hsv_roi, color_hint)
@@ -187,7 +187,7 @@ def detect_color(hsv_roi, color_hint):
         return "UNKNOWN"
 
     if color_hint == "WHITE":
-        if white_ratio >= WHITE_RATIO_THRESHOLD and has_black_bands(hsv_roi):
+        if has_black_bands(hsv_roi) and white_ratio >= (WHITE_RATIO_THRESHOLD * 0.6):
             return "WHITE"
         return "UNKNOWN"
 
@@ -239,17 +239,19 @@ while True:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area < MIN_AREA or area > max_area:
+            min_area = MIN_AREA * 0.6 if color == "GREEN" else MIN_AREA
+            if area < min_area or area > max_area:
                 continue
             x, y, w, h = cv2.boundingRect(cnt)
             if w == 0:
                 continue
             aspect = h / w
             extent = area / float(w * h)
+            min_extent = 0.45 if color == "GREEN" else MIN_EXTENT
             if (
                 ASPECT_MIN < aspect < ASPECT_MAX
                 and h > w
-                and extent >= MIN_EXTENT
+                and extent >= min_extent
             ):
                 candidates.append((x, y, w, h, color))
 
