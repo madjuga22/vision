@@ -1,51 +1,110 @@
 
 import cv2
 import numpy as np
-from collections import deque, Counter
 
 cap = cv2.VideoCapture(1)
 
 COLOR_RANGES = {
     "RED": [
-        ((0, 80, 60), (10, 255, 255)),
-        ((170, 80, 60), (180, 255, 255))
+        ((0, 60, 40), (10, 255, 255)),
+        ((170, 60, 40), (180, 255, 255)),
     ],
     "GREEN": [((35, 40, 40), (85, 255, 255))],
-    "BLUE":  [((90, 50, 50), (130, 255, 255))],
-    "WHITE": [((0, 0, 180), (180, 50, 255))]
+    "BLUE": [((90, 40, 40), (130, 255, 255))],
+    "WHITE": [((0, 0, 120), (180, 70, 255))],
+    "BLACK": [((0, 0, 0), (180, 70, 60))],
 }
 
-MIN_AREA = 1800
-ASPECT_MIN = 2.2
-ASPECT_MAX = 4.0
+COLOR_NAMES_RU = {
+    "RED": "красный",
+    "GREEN": "зелёный",
+    "BLUE": "синий",
+    "WHITE": "белый",
+}
 
-last_box = None
-lost_frames = 0
-MAX_LOST = 15
+DRAW_COLORS = {
+    "RED": (0, 0, 255),
+    "GREEN": (0, 255, 0),
+    "BLUE": (255, 0, 0),
+    "WHITE": (255, 255, 255),
+    "UNKNOWN": (0, 0, 255),
+}
 
-COLOR_BUFFER_SIZE = 12
-color_buffer = deque(maxlen=COLOR_BUFFER_SIZE)
-stable_color = "UNKNOWN"
+MIN_AREA = 900
+ASPECT_MIN = 2.0
+ASPECT_MAX = 5.0
+COLOR_RATIO_THRESHOLD = 0.18
+WHITE_RATIO_THRESHOLD = 0.25
+BLACK_BAND_RATIO = 0.05
 
-# 🔥 НОВОЕ
-last_printed_color = None
+COLOR_TTL = 15
+last_seen = {}
+
+clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+
+def build_mask(hsv_roi, color):
+    mask = np.zeros(hsv_roi.shape[:2], dtype=np.uint8)
+    for low, high in COLOR_RANGES[color]:
+        mask |= cv2.inRange(hsv_roi, np.array(low), np.array(high))
+    return mask
+
+
+def has_black_bands(hsv_roi):
+    mask_black = build_mask(hsv_roi, "BLACK")
+    height = hsv_roi.shape[0]
+    band = max(1, int(height * 0.15))
+    top_band = mask_black[:band, :]
+    bottom_band = mask_black[-band:, :]
+    top_ratio = cv2.countNonZero(top_band) / top_band.size
+    bottom_ratio = cv2.countNonZero(bottom_band) / bottom_band.size
+    return top_ratio > BLACK_BAND_RATIO and bottom_ratio > BLACK_BAND_RATIO
 
 
 def detect_color(hsv_roi):
-    best_color = "UNKNOWN"
-    best_count = 0
+    total_pixels = hsv_roi.shape[0] * hsv_roi.shape[1]
+    if total_pixels == 0:
+        return "UNKNOWN"
 
-    for color, ranges in COLOR_RANGES.items():
-        mask = np.zeros(hsv_roi.shape[:2], dtype=np.uint8)
-        for low, high in ranges:
-            mask |= cv2.inRange(hsv_roi, np.array(low), np.array(high))
+    scores = {}
+    for color in ("RED", "GREEN", "BLUE"):
+        mask = build_mask(hsv_roi, color)
+        scores[color] = cv2.countNonZero(mask) / total_pixels
 
-        count = cv2.countNonZero(mask)
-        if count > best_count:
-            best_count = count
-            best_color = color
+    white_mask = build_mask(hsv_roi, "WHITE")
+    white_ratio = cv2.countNonZero(white_mask) / total_pixels
 
-    return best_color
+    best_color = max(scores, key=scores.get)
+    if scores[best_color] >= COLOR_RATIO_THRESHOLD:
+        return best_color
+
+    if white_ratio >= WHITE_RATIO_THRESHOLD and has_black_bands(hsv_roi):
+        return "WHITE"
+
+    return "UNKNOWN"
+
+
+def boxes_overlap(box_a, box_b):
+    ax, ay, aw, ah = box_a
+    bx, by, bw, bh = box_b
+    x_left = max(ax, bx)
+    y_top = max(ay, by)
+    x_right = min(ax + aw, bx + bw)
+    y_bottom = min(ay + ah, by + bh)
+    if x_right <= x_left or y_bottom <= y_top:
+        return 0.0
+    intersection = (x_right - x_left) * (y_bottom - y_top)
+    union = aw * ah + bw * bh - intersection
+    return intersection / union if union else 0.0
+
+
+def dedupe_boxes(boxes, overlap_threshold=0.4):
+    result = []
+    for box in sorted(boxes, key=lambda b: b[2] * b[3], reverse=True):
+        if any(boxes_overlap(box, kept) > overlap_threshold for kept in result):
+            continue
+        result.append(box)
+    return result
 
 
 while True:
@@ -55,73 +114,64 @@ while True:
 
     frame = cv2.GaussianBlur(frame, (5, 5), 0)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+    v = clahe.apply(v)
+    hsv = cv2.merge([h, s, v])
 
-    best_candidate = None
-    best_area = 0
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = clahe.apply(gray)
+    edges = cv2.Canny(gray, 40, 140)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
 
-    for ranges in COLOR_RANGES.values():
-        mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-        for low, high in ranges:
-            mask |= cv2.inRange(hsv, np.array(low), np.array(high))
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    frame_area = frame.shape[0] * frame.shape[1]
+    max_area = frame_area * 0.2
+    candidates = []
 
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < MIN_AREA or area > max_area:
+            continue
 
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < MIN_AREA:
-                continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w == 0:
+            continue
+        aspect = h / w
+        if ASPECT_MIN < aspect < ASPECT_MAX and h > w:
+            candidates.append((x, y, w, h))
 
-            x, y, w, h = cv2.boundingRect(cnt)
-            aspect = h / w if w > 0 else 0
+    candidates = dedupe_boxes(candidates)
 
-            if ASPECT_MIN < aspect < ASPECT_MAX:
-                if area > best_area:
-                    best_area = area
-                    best_candidate = (x, y, w, h)
+    detected_colors = []
+    for x, y, w, h in candidates:
+        roi = hsv[y : y + h, x : x + w]
+        color = detect_color(roi)
+        if color == "UNKNOWN":
+            continue
 
-    if best_candidate is not None:
-        last_box = best_candidate
-        lost_frames = 0
-
-        x, y, w, h = best_candidate
-        roi = hsv[y:y+h, x:x+w]
-
-        detected = detect_color(roi)
-        if detected != "UNKNOWN":
-            color_buffer.append(detected)
-
-        if len(color_buffer) > 0:
-            stable_color = Counter(color_buffer).most_common(1)[0][0]
-
-        # 🖨️ ВЫВОД В КОНСОЛЬ
-        if stable_color != last_printed_color and stable_color != "UNKNOWN":
-            print(f"Detected cylinder color: {stable_color}")
-            last_printed_color = stable_color
-
-    else:
-        lost_frames += 1
-
-    if lost_frames > MAX_LOST:
-        last_box = None
-        color_buffer.clear()
-        stable_color = "UNKNOWN"
-        last_printed_color = None
-
-    if last_box is not None:
-        x, y, w, h = last_box
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
+        detected_colors.append(color)
+        draw_color = DRAW_COLORS.get(color, DRAW_COLORS["UNKNOWN"])
+        cv2.rectangle(frame, (x, y), (x + w, y + h), draw_color, 2)
         cv2.putText(
             frame,
-            stable_color,
+            color,
             (x, y - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
-            (0, 0, 255),
-            2
+            draw_color,
+            2,
         )
+
+    for color in detected_colors:
+        if color not in last_seen:
+            print(f"обнаружен цилиндр цвета {COLOR_NAMES_RU[color]}")
+        last_seen[color] = COLOR_TTL
+
+    for color in list(last_seen.keys()):
+        last_seen[color] -= 1
+        if last_seen[color] <= 0:
+            last_seen.pop(color, None)
 
     cv2.imshow("Cylinder detection", frame)
 
