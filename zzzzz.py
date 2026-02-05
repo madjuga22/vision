@@ -34,13 +34,16 @@ MIN_AREA = 1200
 ASPECT_MIN = 2.2
 ASPECT_MAX = 4.5
 COLOR_RATIO_THRESHOLD = 0.16
-WHITE_RATIO_THRESHOLD = 0.25
+WHITE_RATIO_THRESHOLD = 0.18
 BLACK_BAND_RATIO = 0.06
 CANDIDATE_OVERLAP = 0.3
 MIN_EXTENT = 0.5
 MIN_SATURATION = 45
 BLACK_BAND_MIN_RATIO = 0.02
 BLACK_BAND_VERTICAL_GAP = 0.35
+BLACK_BAND_MIN_AREA = 80
+BLACK_BAND_MIN_ASPECT = 3.0
+BLACK_BAND_X_OVERLAP = 0.5
 
 COLOR_TTL = 15
 last_seen = {}
@@ -83,6 +86,26 @@ def has_black_bands(hsv_roi):
     )
     gap_ratio = (bottom_center - top_center) / max(1, height)
     return gap_ratio >= BLACK_BAND_VERTICAL_GAP
+
+
+def pair_black_bands(bands):
+    pairs = []
+    for i, top in enumerate(bands):
+        for j, bottom in enumerate(bands):
+            if j == i:
+                continue
+            if bottom[1] <= top[1]:
+                continue
+            x_left = max(top[0], bottom[0])
+            x_right = min(top[0] + top[2], bottom[0] + bottom[2])
+            overlap = max(0, x_right - x_left)
+            min_width = min(top[2], bottom[2])
+            if min_width == 0:
+                continue
+            if overlap / min_width < BLACK_BAND_X_OVERLAP:
+                continue
+            pairs.append((top, bottom))
+    return pairs
 
 
 def detect_color(hsv_roi, color_hint):
@@ -167,29 +190,41 @@ while True:
             ):
                 candidates.append((x, y, w, h, color))
 
-    white_mask = build_mask(hsv, "WHITE")
-    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     black_mask = build_mask(hsv, "BLACK")
+    black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
     black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    white_with_black = cv2.bitwise_and(white_mask, cv2.dilate(black_mask, None, 1))
-    white_contours, _ = cv2.findContours(
-        white_with_black, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    black_contours, _ = cv2.findContours(
+        black_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
-    for cnt in white_contours:
+    black_bands = []
+    for cnt in black_contours:
         area = cv2.contourArea(cnt)
-        if area < MIN_AREA or area > max_area:
+        if area < BLACK_BAND_MIN_AREA or area > max_area:
             continue
         x, y, w, h = cv2.boundingRect(cnt)
         if w == 0:
             continue
+        if (w / max(1, h)) < BLACK_BAND_MIN_ASPECT:
+            continue
+        black_bands.append((x, y, w, h))
+
+    white_mask = build_mask(hsv, "WHITE")
+    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+
+    for top, bottom in pair_black_bands(black_bands):
+        x = min(top[0], bottom[0])
+        y = top[1]
+        w = max(top[0] + top[2], bottom[0] + bottom[2]) - x
+        h = (bottom[1] + bottom[3]) - y
+        if w == 0 or h == 0:
+            continue
         aspect = h / w
-        extent = area / float(w * h)
-        if (
-            ASPECT_MIN < aspect < ASPECT_MAX
-            and h > w
-            and extent >= MIN_EXTENT
-        ):
+        if not (ASPECT_MIN < aspect < ASPECT_MAX and h > w):
+            continue
+        roi_white = white_mask[y : y + h, x : x + w]
+        white_ratio = cv2.countNonZero(roi_white) / float(w * h)
+        if white_ratio >= WHITE_RATIO_THRESHOLD:
             candidates.append((x, y, w, h, "WHITE"))
     candidates = dedupe_boxes(candidates)
 
