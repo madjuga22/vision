@@ -9,8 +9,8 @@ COLOR_RANGES = {
         ((0, 60, 40), (10, 255, 255)),
         ((170, 60, 40), (180, 255, 255)),
     ],
-    "GREEN": [((20, 20, 20), (100, 255, 255))],
-    "BLUE": [((90, 40, 40), (130, 255, 255))],
+    "GREEN": [((15, 15, 15), (110, 255, 255))],
+    "BLUE": [((85, 30, 30), (135, 255, 255))],
     "WHITE": [((0, 0, 140), (180, 90, 255))],
     "BLACK": [((0, 0, 0), (180, 90, 80))],
 }
@@ -35,12 +35,14 @@ ASPECT_MIN = 2.2
 ASPECT_MAX = 4.5
 COLOR_RATIO_THRESHOLD = 0.22
 GREEN_RATIO_THRESHOLD = 0.12
+BLUE_RATIO_THRESHOLD = 0.18
 WHITE_RATIO_THRESHOLD = 0.12
 BLACK_BAND_RATIO = 0.04
 CANDIDATE_OVERLAP = 0.3
 MIN_EXTENT = 0.5
 MIN_SATURATION = 60
 GREEN_MIN_SATURATION = 30
+BLUE_MIN_SATURATION = 40
 BLACK_BAND_MIN_RATIO = 0.015
 BLACK_BAND_VERTICAL_GAP = 0.25
 BLACK_BAND_MIN_AREA = 60
@@ -53,7 +55,7 @@ COLOR_TTL = 15
 WHITE_TTL = 30
 HIT_CONFIRM = 2
 HIT_DECAY = 1
-WHITE_HIT_CONFIRM = 3
+WHITE_HIT_CONFIRM = 4
 last_seen = {}
 color_hits = {"RED": 0, "GREEN": 0, "BLUE": 0, "WHITE": 0}
 
@@ -180,6 +182,9 @@ def detect_color(hsv_roi, color_hint):
         if color_hint == "GREEN":
             min_saturation = GREEN_MIN_SATURATION
             min_ratio = GREEN_RATIO_THRESHOLD
+        if color_hint == "BLUE":
+            min_saturation = BLUE_MIN_SATURATION
+            min_ratio = BLUE_RATIO_THRESHOLD
         if color_hint == "BLUE" and white_ratio >= WHITE_RATIO_THRESHOLD:
             return "UNKNOWN"
         if ratio >= min_ratio and saturation_mean >= min_saturation:
@@ -239,7 +244,12 @@ while True:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            min_area = MIN_AREA * 0.6 if color == "GREEN" else MIN_AREA
+            if color == "GREEN":
+                min_area = MIN_AREA * 0.5
+            elif color == "BLUE":
+                min_area = MIN_AREA * 0.7
+            else:
+                min_area = MIN_AREA
             if area < min_area or area > max_area:
                 continue
             x, y, w, h = cv2.boundingRect(cnt)
@@ -247,7 +257,12 @@ while True:
                 continue
             aspect = h / w
             extent = area / float(w * h)
-            min_extent = 0.45 if color == "GREEN" else MIN_EXTENT
+            if color == "GREEN":
+                min_extent = 0.4
+            elif color == "BLUE":
+                min_extent = 0.45
+            else:
+                min_extent = MIN_EXTENT
             if (
                 ASPECT_MIN < aspect < ASPECT_MAX
                 and h > w
