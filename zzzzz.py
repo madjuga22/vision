@@ -47,7 +47,11 @@ BLACK_BAND_X_OVERLAP = 0.3
 BLACK_BAND_HEIGHT_RATIO = 0.2
 
 COLOR_TTL = 15
+WHITE_TTL = 30
+HIT_CONFIRM = 2
+HIT_DECAY = 1
 last_seen = {}
+color_hits = {"RED": 0, "GREEN": 0, "BLUE": 0, "WHITE": 0}
 
 clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
@@ -245,8 +249,15 @@ while True:
         color = detect_color(roi, color_hint)
         if color == "UNKNOWN":
             continue
+        detected_colors.append((color, x, y, w, h))
 
-        detected_colors.append(color)
+    for color_name in color_hits:
+        color_hits[color_name] = max(0, color_hits[color_name] - HIT_DECAY)
+
+    for color, x, y, w, h in detected_colors:
+        color_hits[color] += 1
+        if color_hits[color] < HIT_CONFIRM:
+            continue
         draw_color = DRAW_COLORS.get(color, DRAW_COLORS["UNKNOWN"])
         cv2.rectangle(frame, (x, y), (x + w, y + h), draw_color, 2)
         cv2.putText(
@@ -259,10 +270,10 @@ while True:
             2,
         )
 
-    for color in detected_colors:
+    for color, _, _, _, _ in detected_colors:
         if color not in last_seen:
             print(f"обнаружен цилиндр цвета {COLOR_NAMES_RU[color]}")
-        last_seen[color] = COLOR_TTL
+        last_seen[color] = WHITE_TTL if color == "WHITE" else COLOR_TTL
 
     for color in list(last_seen.keys()):
         last_seen[color] -= 1
