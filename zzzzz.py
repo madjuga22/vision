@@ -9,7 +9,7 @@ COLOR_RANGES = {
         ((0, 60, 40), (10, 255, 255)),
         ((170, 60, 40), (180, 255, 255)),
     ],
-    "GREEN": [((30, 25, 30), (90, 255, 255))],
+    "GREEN": [((25, 20, 20), (95, 255, 255))],
     "BLUE": [((90, 40, 40), (130, 255, 255))],
     "WHITE": [((0, 0, 140), (180, 90, 255))],
     "BLACK": [((0, 0, 0), (180, 90, 80))],
@@ -34,11 +34,13 @@ MIN_AREA = 1200
 ASPECT_MIN = 2.2
 ASPECT_MAX = 4.5
 COLOR_RATIO_THRESHOLD = 0.22
+GREEN_RATIO_THRESHOLD = 0.18
 WHITE_RATIO_THRESHOLD = 0.15
 BLACK_BAND_RATIO = 0.04
 CANDIDATE_OVERLAP = 0.3
 MIN_EXTENT = 0.5
 MIN_SATURATION = 60
+GREEN_MIN_SATURATION = 45
 BLACK_BAND_MIN_RATIO = 0.015
 BLACK_BAND_VERTICAL_GAP = 0.25
 BLACK_BAND_MIN_AREA = 60
@@ -51,6 +53,7 @@ COLOR_TTL = 15
 WHITE_TTL = 30
 HIT_CONFIRM = 2
 HIT_DECAY = 1
+WHITE_HIT_CONFIRM = 3
 last_seen = {}
 color_hits = {"RED": 0, "GREEN": 0, "BLUE": 0, "WHITE": 0}
 
@@ -173,9 +176,13 @@ def detect_color(hsv_roi, color_hint):
         ratio = cv2.countNonZero(mask) / total_pixels
         saturation_mean = float(np.mean(hsv_roi[:, :, 1]))
         min_saturation = MIN_SATURATION + (10 if color_hint == "BLUE" else 0)
+        min_ratio = COLOR_RATIO_THRESHOLD
+        if color_hint == "GREEN":
+            min_saturation = GREEN_MIN_SATURATION
+            min_ratio = GREEN_RATIO_THRESHOLD
         if color_hint == "BLUE" and white_ratio >= WHITE_RATIO_THRESHOLD:
             return "UNKNOWN"
-        if ratio >= COLOR_RATIO_THRESHOLD and saturation_mean >= min_saturation:
+        if ratio >= min_ratio and saturation_mean >= min_saturation:
             return color_hint
         return "UNKNOWN"
 
@@ -318,7 +325,8 @@ while True:
     confirmed_detections = []
     for color, x, y, w, h in detected_colors:
         color_hits[color] += 1
-        if color_hits[color] < HIT_CONFIRM:
+        confirm_needed = WHITE_HIT_CONFIRM if color == "WHITE" else HIT_CONFIRM
+        if color_hits[color] < confirm_needed:
             continue
         confirmed_detections.append((color, x, y, w, h))
         draw_color = DRAW_COLORS.get(color, DRAW_COLORS["UNKNOWN"])
