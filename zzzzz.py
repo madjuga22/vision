@@ -9,7 +9,7 @@ COLOR_RANGES = {
         ((0, 60, 40), (10, 255, 255)),
         ((170, 60, 40), (180, 255, 255)),
     ],
-    "GREEN": [((15, 15, 15), (110, 255, 255))],
+    "GREEN": [((35, 20, 20), (85, 255, 255))],
     "BLUE": [((85, 30, 30), (135, 255, 255))],
     "WHITE": [((0, 0, 140), (180, 90, 255))],
     "BLACK": [((0, 0, 0), (180, 90, 80))],
@@ -43,6 +43,7 @@ MIN_EXTENT = 0.5
 MIN_SATURATION = 40
 GREEN_MIN_SATURATION = 25
 BLUE_MIN_SATURATION = 30
+GREEN_MIN_VALUE = 60
 BLACK_BAND_MIN_RATIO = 0.015
 BLACK_BAND_VERTICAL_GAP = 0.25
 BLACK_BAND_MIN_AREA = 60
@@ -182,6 +183,9 @@ def detect_color(hsv_roi, color_hint):
         if color_hint == "GREEN":
             min_saturation = GREEN_MIN_SATURATION
             min_ratio = GREEN_RATIO_THRESHOLD
+            value_mean = float(np.mean(hsv_roi[:, :, 2]))
+            if value_mean < GREEN_MIN_VALUE:
+                return "UNKNOWN"
         if color_hint == "BLUE":
             min_saturation = BLUE_MIN_SATURATION
             min_ratio = BLUE_RATIO_THRESHOLD
