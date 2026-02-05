@@ -33,16 +33,16 @@ DRAW_COLORS = {
 MIN_AREA = 1200
 ASPECT_MIN = 2.2
 ASPECT_MAX = 4.5
-COLOR_RATIO_THRESHOLD = 0.22
-GREEN_RATIO_THRESHOLD = 0.12
-BLUE_RATIO_THRESHOLD = 0.18
+COLOR_RATIO_THRESHOLD = 0.15
+GREEN_RATIO_THRESHOLD = 0.1
+BLUE_RATIO_THRESHOLD = 0.12
 WHITE_RATIO_THRESHOLD = 0.12
 BLACK_BAND_RATIO = 0.04
 CANDIDATE_OVERLAP = 0.3
 MIN_EXTENT = 0.5
-MIN_SATURATION = 60
-GREEN_MIN_SATURATION = 30
-BLUE_MIN_SATURATION = 40
+MIN_SATURATION = 40
+GREEN_MIN_SATURATION = 25
+BLUE_MIN_SATURATION = 30
 BLACK_BAND_MIN_RATIO = 0.015
 BLACK_BAND_VERTICAL_GAP = 0.25
 BLACK_BAND_MIN_AREA = 60
@@ -185,7 +185,7 @@ def detect_color(hsv_roi, color_hint):
         if color_hint == "BLUE":
             min_saturation = BLUE_MIN_SATURATION
             min_ratio = BLUE_RATIO_THRESHOLD
-        if color_hint == "BLUE" and white_ratio >= WHITE_RATIO_THRESHOLD:
+        if color_hint == "BLUE" and white_ratio >= (WHITE_RATIO_THRESHOLD * 1.5):
             return "UNKNOWN"
         if ratio >= min_ratio and saturation_mean >= min_saturation:
             return color_hint
