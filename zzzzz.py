@@ -33,18 +33,19 @@ DRAW_COLORS = {
 MIN_AREA = 1200
 ASPECT_MIN = 2.2
 ASPECT_MAX = 4.5
-COLOR_RATIO_THRESHOLD = 0.16
-WHITE_RATIO_THRESHOLD = 0.12
+COLOR_RATIO_THRESHOLD = 0.22
+WHITE_RATIO_THRESHOLD = 0.15
 BLACK_BAND_RATIO = 0.04
 CANDIDATE_OVERLAP = 0.3
 MIN_EXTENT = 0.5
-MIN_SATURATION = 45
+MIN_SATURATION = 60
 BLACK_BAND_MIN_RATIO = 0.015
 BLACK_BAND_VERTICAL_GAP = 0.25
-BLACK_BAND_MIN_AREA = 40
+BLACK_BAND_MIN_AREA = 60
 BLACK_BAND_MIN_ASPECT = 2.0
-BLACK_BAND_X_OVERLAP = 0.3
-BLACK_BAND_HEIGHT_RATIO = 0.2
+BLACK_BAND_X_OVERLAP = 0.4
+BLACK_BAND_HEIGHT_RATIO = 0.15
+BLACK_BAND_WIDTH_SIMILARITY = 0.6
 
 COLOR_TTL = 15
 WHITE_TTL = 30
@@ -101,6 +102,9 @@ def pair_black_bands(bands, frame_height):
                 continue
             if bottom[1] <= top[1]:
                 continue
+            width_ratio = min(top[2], bottom[2]) / max(1, max(top[2], bottom[2]))
+            if width_ratio < BLACK_BAND_WIDTH_SIMILARITY:
+                continue
             x_left = max(top[0], bottom[0])
             x_right = min(top[0] + top[2], bottom[0] + bottom[2])
             overlap = max(0, x_right - x_left)
@@ -129,7 +133,8 @@ def detect_color(hsv_roi, color_hint):
         mask = build_mask(hsv_roi, color_hint)
         ratio = cv2.countNonZero(mask) / total_pixels
         saturation_mean = float(np.mean(hsv_roi[:, :, 1]))
-        if ratio >= COLOR_RATIO_THRESHOLD and saturation_mean >= MIN_SATURATION:
+        min_saturation = MIN_SATURATION + (10 if color_hint == "BLUE" else 0)
+        if ratio >= COLOR_RATIO_THRESHOLD and saturation_mean >= min_saturation:
             return color_hint
         return "UNKNOWN"
 
